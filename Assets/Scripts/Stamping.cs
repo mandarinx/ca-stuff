@@ -1,4 +1,5 @@
-﻿using UnityEngine;
+﻿using System;
+using UnityEngine;
 using System.Collections.Generic;
 
 public class Stamping : MonoBehaviour {
@@ -14,8 +15,13 @@ public class Stamping : MonoBehaviour {
     private Mesh[] meshes = new Mesh[MAP_LEN];
     private List<int> factories = new List<int>();
     private List<int> factoryIndex = new List<int>();
+    private List<int> forests = new List<int>();
+    private List<int> forestIndex = new List<int>();
 
     private int tileValue;
+    
+    private KeyCode[] keyCodes;
+    private Action<Vector3>[] keyCallbacks;
     
     private void Awake() {
         for (int i = 0; i < MAP_LEN; ++i) {
@@ -26,6 +32,13 @@ public class Stamping : MonoBehaviour {
             
             SetVertexColors(meshes[i], Color.black);
         }
+        
+        keyCodes = new [] {
+            KeyCode.Alpha1, KeyCode.Alpha2, 
+        };
+        keyCallbacks = new Action<Vector3>[] {
+            HandleFactory, HandleForest
+        };
     }
 
     void Update() {
@@ -38,18 +51,12 @@ public class Stamping : MonoBehaviour {
         if (!Input.GetMouseButtonUp(0)) {
             return;
         }
-        int fi = GetIndex(hit.point);
-        if (factoryIndex.IndexOf(fi) >= 0) {
-            RemoveFactory(fi);
-        } else {
-            AddFactory(fi, new Vector3(hit.point.x, 6, hit.point.z));
-        }
 
-        for (int i = 0; i < factories.Count; ++i) {
-            if (factoryIndex[i] < 0) {
+        for (int i = 0; i < keyCodes.Length; ++i) {
+            if (!Input.GetKey(keyCodes[i])) {
                 continue;
             }
-            SetVertexColors(meshes[factoryIndex[i]], Color.red);
+            keyCallbacks[i].Invoke(hit.point);
         }
     }
 
@@ -57,12 +64,74 @@ public class Stamping : MonoBehaviour {
         GUI.Label(new Rect(10, 10, 50, 20), tileValue.ToString());
     }
 
-    public void AddFactory(int f, Vector3 coord) {
-        factories.Add((int)coord.y);
-        factoryIndex.Add(GetIndex(coord));
+    private void ColorizeEntities() {
+        for (int i = 0; i < factories.Count; ++i) {
+            if (factoryIndex[i] < 0) {
+                continue;
+            }
+            SetVertexColors(meshes[factoryIndex[i]], Color.red);
+        }
 
+        for (int i = 0; i < forests.Count; ++i) {
+            if (forestIndex[i] < 0) {
+                continue;
+            }
+            SetVertexColors(meshes[forestIndex[i]], Color.green);
+        }
+    }
+
+    private void HandleFactory(Vector3 coord) {
+        int fi = GetIndex(coord);
+        if (factoryIndex.IndexOf(fi) >= 0) {
+            RemoveFactory(fi);
+        } else {
+            AddFactory(fi, new Vector3(coord.x, 6, coord.z));
+        }
+        ColorizeEntities();
+    }
+
+    private void HandleForest(Vector3 coord) {
+        int fi = GetIndex(coord);
+        if (forestIndex.IndexOf(fi) >= 0) {
+            RemoveForest(fi);
+        } else {
+            AddForest(fi, new Vector3(coord.x, 3, coord.z));
+        }
+        ColorizeEntities();
+    }
+    
+    private void RemoveForest(int f) {}
+
+    private void AddForest(int f, Vector3 coord) {
         int radius = (int) coord.y;
         int[] buffer = GetStampBuffer(radius);
+        
+        forests.Add(radius);
+        forestIndex.Add(GetIndex(coord));
+        
+        BlitBuffer(buffer, radius, falloff);
+        
+        coord.x -= radius - 1;
+        coord.z -= radius - 1;
+        int start = GetIndex(coord);
+
+        int[] indexes = GetBufferIndexes(buffer, start, radius);
+
+        for (int i = 0; i < indexes.Length; ++i) {
+            int n = indexes[i];
+            pollution[n] -= buffer[i];
+            float pf = (float)pollution[n] / 255;
+            SetVertexColors(meshes[n], new Color(pf, pf, pf));
+        }
+    }
+
+    public void AddFactory(int f, Vector3 coord) {
+        int radius = (int) coord.y;
+        int[] buffer = GetStampBuffer(radius);
+        
+        factories.Add(radius);
+        factoryIndex.Add(GetIndex(coord));
+
         BlitBuffer(buffer, radius, falloff);
 
         coord.x -= radius - 1;
