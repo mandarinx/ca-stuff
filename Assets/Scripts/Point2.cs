@@ -37,6 +37,11 @@ public struct Point2 {
     public static Point2 operator -(Point2 a, Point2 b) {
         return new Point2(a.x - b.x, a.y - b.y);
     }
+
+    public static Point2 operator -(Point2 a, int b) {
+        return new Point2(a.x - b, a.y - b);
+    }
+    
     public static Point2 operator -(Point2 a) {
         return new Point2(-a.x, -a.y);
     }
