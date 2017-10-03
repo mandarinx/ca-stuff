@@ -1,7 +1,6 @@
 ﻿using System;
 using UnityEngine;
 using System.Collections.Generic;
-using System.Reflection;
 using Mandarin;
 
 namespace Mandarin {
@@ -28,10 +27,14 @@ namespace Mandarin {
             );
         }
     }
-
 }
 
 public class Stamping : MonoBehaviour {
+
+    private enum StampMode {
+        ADD = 1,
+        SUB = -1,
+    }
     
     private const int MAP_DIM = 32;
     private const int MAP_HALF_DIM = (int)(MAP_DIM * 0.5f);
@@ -51,15 +54,17 @@ public class Stamping : MonoBehaviour {
     private int tileValue;
 
     private int[] entityRadius = new int[2] {
-        3, // factory
-        1, // forest
+        4, // factory
+        2, // forest
     };
     
     private KeyCode[] keyCodes;
     private Action<Vector3>[] keyCallbacks;
     private string[] keyHelp;
     
-    private Rectangle mapRect = new Rectangle(MAP_HALF_DIM, MAP_HALF_DIM, -MAP_HALF_DIM, -MAP_HALF_DIM);
+    private Rectangle mapRect = new Rectangle(
+        MAP_HALF_DIM - 1, MAP_HALF_DIM - 1, 
+        -MAP_HALF_DIM,    -MAP_HALF_DIM);
     
     private void Awake() {
     
@@ -99,43 +104,8 @@ public class Stamping : MonoBehaviour {
             return;
         }
 
-        for (int i = 0; i < MAP_AREA; ++i) {
-            SetVertexColors(meshes[i], Color.black);
-        }
-
-        ColorizeEntities();
-
-        int radius = 0;
-        for (int i = 0; i < keyCodes.Length; ++i) {
-            if (!Input.GetKey(keyCodes[i])) {
-                continue;
-            }
-            radius = entityRadius[i];
-            break;
-        }
-
-        if (radius == 0) {
-            return;
-        }
-        
-        Point2 mouse = GetMousePoint(hit.point) - MAP_HALF_DIM;
-        Rectangle blitRect = new Rectangle(radius, radius, -(radius - 1), -(radius - 1));
-        Rectangle intr = Rectangle.GetOverlap(blitRect, mapRect, mouse);
-        
-        int x = Mathf.FloorToInt(hit.point.x);
-        int z = Mathf.FloorToInt(hit.point.z);
-        DrawRect(intr, new Vector3(x, 0f, z), Color.red);
-        
-        Point2 tl = new Point2(x + intr.l,     z + intr.t - 1);
-        Point2 tr = new Point2(x + intr.r - 1, z + intr.t - 1);
-        Point2 br = new Point2(x + intr.r - 1, z + intr.b);
-        Point2 bl = new Point2(x + intr.l,     z + intr.b);
-        SetVertexColors(meshes[GetIndex(tl)], Color.yellow);
-        SetVertexColors(meshes[GetIndex(tr)], Color.yellow);
-        SetVertexColors(meshes[GetIndex(bl)], Color.yellow);
-        SetVertexColors(meshes[GetIndex(br)], Color.yellow);
-
         tileValue = pollution[GetIndex(hit.point)];
+        
         if (!Input.GetMouseButtonUp(0)) {
             return;
         }
@@ -147,26 +117,7 @@ public class Stamping : MonoBehaviour {
             keyCallbacks[i].Invoke(hit.point);
             break;
         }
-    }
-
-    private Vector3[] PrintValues(int[] values, Rectangle crop, Point2 cropCenter) {
-        int rectWidth = cropCenter.x * 2;
-        int start = GetIndex(new Point2(cropCenter.x + crop.l, cropCenter.y + crop.b), rectWidth);
-        int n = start;
-        int width = Mathf.Abs(crop.l) + crop.r;
-        int len = width * (Mathf.Abs(crop.b) + crop.t);
-        Vector3[] indexedValues = new Vector3[len];
-        
-        for (int i = 0; i < len; ++i) {
-            Point2 coord = GetCoord(n, rectWidth);
-            indexedValues[i] = new Vector3(coord.x, values[n], coord.y);
-            ++n;
-            if (i > 0 && i % width == 0) {
-                n += width;
-            }
-        }
-
-        return indexedValues;
+        ColorizeEntities();
     }
 
     private void OnDrawGizmos() {
@@ -178,17 +129,6 @@ public class Stamping : MonoBehaviour {
         }
     }
 
-    private void DrawRect(Rectangle r, Vector3 pos, Color col) {
-        Vector3 tl = new Vector3(r.l, 0f, r.t) + pos;
-        Vector3 tr = new Vector3(r.r, 0f, r.t) + pos;
-        Vector3 br = new Vector3(r.r, 0f, r.b) + pos;
-        Vector3 bl = new Vector3(r.l, 0f, r.b) + pos;
-        Debug.DrawLine(tl, tr, col, Time.deltaTime);
-        Debug.DrawLine(tr, br, col, Time.deltaTime);
-        Debug.DrawLine(br, bl, col, Time.deltaTime);
-        Debug.DrawLine(bl, tl, col, Time.deltaTime);
-    }
-
     private void OnGUI() {
         GUI.Label(new Rect(10, 10, 50, 20), tileValue.ToString());
         float height = keyHelp.Length * 20f;
@@ -197,6 +137,93 @@ public class Stamping : MonoBehaviour {
             help += keyHelp[i] + "\n";
         }
         GUI.Label(new Rect(10, Screen.height - height, 100, height), help);
+    }
+
+    private void HandleFactory(Vector3 coord) {
+        int f = GetIndex(coord);
+        int fi = factoryIndex.IndexOf(f);
+        if (fi >= 0) {
+            RemoveFactory(f, new Vector3(coord.x, factories[fi], coord.z));
+        } else {
+            AddFactory(f, new Vector3(coord.x, entityRadius[0], coord.z));
+        }
+    }
+
+    private void HandleForest(Vector3 coord) {
+        int f = GetIndex(coord);
+        int fi = forestIndex.IndexOf(f);
+        if (fi >= 0) {
+            RemoveForest(f, new Vector3(coord.x, forests[fi], coord.z));
+        } else {
+            AddForest(f, new Vector3(coord.x, entityRadius[1], coord.z));
+        }
+    }
+
+    private void RemoveForest(int f, Vector3 coord) {
+        int n = forestIndex.IndexOf(f);
+        int radius = (int)coord.y;
+        forestIndex[n] = -1;
+        forests[n] = 0;
+
+        StampBlobToMap(radius, SnapToMap(coord), pollution, StampMode.ADD);
+    }
+
+    private void AddForest(int f, Vector3 coord) {
+        int radius = (int)coord.y;
+        StampBlobToMap(radius, SnapToMap(coord), pollution, StampMode.SUB);
+        forests.Add(radius);
+        forestIndex.Add(GetIndex(coord));
+    }
+
+    public void AddFactory(int f, Vector3 coord) {
+        int radius = (int)coord.y;
+        StampBlobToMap(radius, SnapToMap(coord), pollution, StampMode.ADD);
+        factories.Add(radius);
+        factoryIndex.Add(GetIndex(coord));
+    }
+
+    public void RemoveFactory(int f, Vector3 coord) {
+        int n = factoryIndex.IndexOf(f);
+        int radius = (int)coord.y;
+        factoryIndex[n] = -1;
+        factories[n] = 0;
+
+        StampBlobToMap(radius, SnapToMap(coord), pollution, StampMode.SUB);
+    }
+    
+    private void StampBlobToMap(int radius, Point2 coord, int[] mapData, StampMode mode) {
+        SetVertexColors(meshes[GetIndex(coord)], Color.magenta);
+
+        Rectangle blitRect = new Rectangle(radius, radius, -radius, -radius);
+        Rectangle cropped = Rectangle.GetOverlap(blitRect, mapRect, coord - MAP_HALF_DIM);
+        int[] buffer = GetStampBuffer(radius);
+        DrawFalloff(buffer, radius, falloff);
+        
+        int bufferWidth = radius * 2 + 1;
+        int start = GetIndex(new Point2(radius + cropped.l, radius + cropped.b), bufferWidth);
+        int n = 0;
+        int width = cropped.l * -1 + cropped.r + 1;
+        int len = width * (cropped.b * -1 + cropped.t + 1);
+        Vector3[] croppedBuffer = new Vector3[len];
+        
+        for (int i = 0; i < len; ++i) {
+            Point2 bc = GetCoord(start + n, bufferWidth);
+            croppedBuffer[i] = new Vector3(bc.x, buffer[start + n], bc.y);
+            n = (n + 1) % width;
+            if (n == 0) {
+                start += bufferWidth;
+            }
+        }
+
+        for (int i=0; i<croppedBuffer.Length; ++i) {
+            Point2 c = new Point2(
+                coord.x + croppedBuffer[i].x - radius, 
+                coord.y + croppedBuffer[i].z - radius);
+            int j = GetIndex(c);
+            mapData[j] = mapData[j] + (int)croppedBuffer[i].y * (int)mode;
+            float pf = (float)mapData[j] / 255;
+            SetVertexColors(meshes[j], new Color(pf, pf, pf));
+        }
     }
 
     private void ColorizeEntities() {
@@ -215,257 +242,20 @@ public class Stamping : MonoBehaviour {
         }
     }
 
-    private Point2 GetMousePoint(Vector3 pos) {
-        return new Point2(
-            Mathf.RoundToInt(pos.x) - 16, 
-            Mathf.RoundToInt(pos.z) - 16);
-    }
-
-    private void HandleFactory(Vector3 coord) {
-        int fi = GetIndex(coord);
-        if (factoryIndex.IndexOf(fi) >= 0) {
-            RemoveFactory(fi);
-        } else {
-            AddFactory(fi, new Vector3(coord.x, entityRadius[0], coord.z));
-        }
-    }
-
-    private void HandleForest(Vector3 coord) {
-        int fi = GetIndex(coord);
-        if (forestIndex.IndexOf(fi) >= 0) {
-            RemoveForest(fi);
-        } else {
-            AddForest(fi, new Vector3(coord.x, entityRadius[1], coord.z));
-        }
-    }
-    
-    private void RemoveForest(int f) {}
-
-    private void AddForest(int f, Vector3 coord) {
-
-        int radius = (int)coord.y;
-        Rectangle intr = GetBlitRectangle(coord, radius);
-        int[] buffer = GetStampBuffer(radius);
-        BlitBuffer(buffer, radius, falloff);
-        Point2 mouse = GetMousePoint(coord);
-
-        forests.Add(radius);
-        forestIndex.Add(GetIndex(coord));
-        
-//        Point2 tl = new Point2(x + intr.l,     z + intr.t - 1);
-//        Point2 tr = new Point2(x + intr.r - 1, z + intr.t - 1);
-//        Point2 br = new Point2(x + intr.r - 1, z + intr.b);
-//        Point2 bl = new Point2(x + intr.l,     z + intr.b);
-//        SetVertexColors(meshes[GetIndex(tl)], Color.yellow);
-//        SetVertexColors(meshes[GetIndex(tr)], Color.yellow);
-//        SetVertexColors(meshes[GetIndex(bl)], Color.yellow);
-//        SetVertexColors(meshes[GetIndex(br)], Color.yellow);
-
-        Vector3[] croppedBuffer = PrintValues(buffer, intr, new Point2(4, 4));
-        for (int i=0; i<croppedBuffer.Length; ++i) {
-            Point2 c = new Point2(croppedBuffer[i].x + mouse.x, croppedBuffer[i].z + mouse.y);
-            int n = GetIndex(c);
-            pollution[n] += (int)croppedBuffer[i].y;
-        } 
-
-
-//        int radius = (int) coord.y;
-//        Rectangle bufferRect = new Rectangle(radius, radius, -radius, -radius);
-//        Point2 mouse = GetMousePoint(coord);
-//        Rectangle croppedRect = Rectangle.GetOverlap(bufferRect, mapRect, mouse);
-//        int[] buffer = GetStampBuffer(radius);
-        
-//        forests.Add(radius);
-//        forestIndex.Add(GetIndex(coord));
-        
-//        BlitBuffer(buffer, radius, falloff);
-
-
-//        Point2 tl = new Point2(coord.x + croppedRect.l, coord.z + croppedRect.t);
-//        Point2 tr = new Point2(coord.x + croppedRect.r, coord.z + croppedRect.t);
-//        Point2 br = new Point2(coord.x + croppedRect.r, coord.z + croppedRect.b);
-//        Point2 bl = new Point2(coord.x + croppedRect.l, coord.z + croppedRect.b);
-//        SetVertexColors(meshes[GetIndex(tl)], Color.yellow);
-//        SetVertexColors(meshes[GetIndex(tr)], Color.yellow);
-//        SetVertexColors(meshes[GetIndex(bl)], Color.yellow);
-//        SetVertexColors(meshes[GetIndex(br)], Color.yellow);
-        
-//        coord.x -= radius - 1;
-//        coord.z -= radius - 1;
-//        int start = GetIndex(coord);
-//
-//        int[] indexes = GetBufferIndexes(buffer, start, radius);
-//
-//        for (int i = 0; i < indexes.Length; ++i) {
-//            int n = indexes[i];
-//            pollution[n] -= buffer[i];
-//            float pf = (float)pollution[n] / 255;
-//            SetVertexColors(meshes[n], new Color(pf, pf, pf));
-//        }
-    }
-
-    public void AddFactory(int f, Vector3 coord) {
-        int radius = (int) coord.y;
-        int[] buffer = GetStampBuffer(radius);
-        
-        factories.Add(radius);
-        factoryIndex.Add(GetIndex(coord));
-
-        BlitBuffer(buffer, radius, falloff);
-
-        int startx = Mathf.RoundToInt(coord.x) - radius;
-        int starty = Mathf.RoundToInt(coord.x) - radius;
-        int endx = Mathf.RoundToInt(coord.z) + radius - 1;
-        int endy = Mathf.RoundToInt(coord.z) + radius - 1;
-
-        SetVertexColors(meshes[GetIndex(new Point2(startx, starty))], Color.magenta);
-        SetVertexColors(meshes[GetIndex(new Point2(endx, endy))], Color.cyan);
-        
-//        Rectangle mapr = new Rectangle(
-//            new Point2(0, 0), 
-//            new Point2(MAP_DIM, MAP_DIM));
-//        Rectangle stampr = new Rectangle(
-//            new Point2(startx, starty), 
-//            new Point2(endx, endy));
-//        
-//        Rectangle intersect = Rectangle.Intersect(stampr, mapr);
-//        int start = GetIndex(intersect.bl);
-//        int end = GetIndex(intersect.tr);
-        
-//        coord.x -= radius - 1;
-//        coord.z -= radius - 1;
-//
-//        int endx = (int)coord.x + radius + radius - 1;
-//        int endy = (int)coord.z + radius + radius - 1;
-//        
-//        if (coord.x < 0) {
-//            coord.x = 0;
-//        }
-//        if (coord.z < 0) {
-//            coord.z = 0;
-//        }
-//
-//        if (endx >= MAP_DIM) {
-//            endx = MAP_DIM - 1;
-//        }
-//        if (endy >= MAP_DIM) {
-//            endy = MAP_DIM - 1;
-//        }
-//        
-//        Point2 startp = new Point2(coord.x, coord.z);
-//        Point2 endp = new Point2(endx, endy);
-//        int start = GetIndex(startp);
-//        int end = GetIndex(endp);
-//
-//        int[] indices = GetStampRect(startp, endp);
-//        SetMapIndices(indices, new Point2(coord.x, coord.z), new Point2(endx, endy));
-//
-//        for (int i = 0; i < indices.Length; ++i) {
-//            int n = indices[i];
-//            pollution[n] += buffer[i];
-//            float pf = (float)pollution[n] / 255;
-//            SetVertexColors(meshes[n], new Color(pf, pf, pf));
-//        }
-        
-//        SetVertexColors(meshes[end], Color.magenta);
-//        SetVertexColors(meshes[start], Color.cyan);
-    }
-
-    public void RemoveFactory(int f) {
-        int n = factoryIndex.IndexOf(f);
-        int radius = factories[n];
-        factoryIndex[n] = -1;
-        factories[n] = 0;
-        
-        int[] buffer = GetStampBuffer(radius);
-        BlitBuffer(buffer, radius, falloff);
-
-        Point2 fCoord = GetCoord(f);
-        fCoord = new Point2(fCoord.x - radius + 1, fCoord.y - radius + 1);
-        int start = GetIndex(fCoord);
-
-        int[] indexes = GetBufferIndexes(buffer, start, radius);
-
-        for (int i = 0; i < indexes.Length; ++i) {
-            int j = indexes[i];
-            pollution[j] -= buffer[i];
-            float pf = (float)pollution[j] / 255;
-            SetVertexColors(meshes[j], new Color(pf, pf, pf));
-        }
-    }
-
-    private Rectangle GetBlitRectangle(Vector3 hitPoint, int dim) {
-        const float mapHalfDim = MAP_DIM * 0.5f;
-        Rectangle blitRect = new Rectangle(dim, dim, -dim, -dim);
-        Point2 mouse = new Point2(
-            Mathf.FloorToInt(hitPoint.x) - mapHalfDim, 
-            Mathf.FloorToInt(hitPoint.z) - mapHalfDim);
-        return Rectangle.GetOverlap(blitRect, mapRect, mouse);
-    }
-
     private static int[] GetStampBuffer(int radius) {
-        int line = 2 * radius - 1;
+        int line = 2 * radius + 1;
         return new int[line * line];
     }
 
-    private static void BlitBuffer(int[] buffer, int radius, AnimationCurve falloff) {
-        int center = radius - 1;
-        int line = 2 * radius - 1;
+    private static void DrawFalloff(int[] buffer, int radius, AnimationCurve falloff) {
+        int line = 2 * radius + 1;
         
         for (int i = 0; i < buffer.Length; ++i) {
-            int x = (i % line) - center;
-            int y = Mathf.FloorToInt((float)i / line) - center;
+            int x = (i % line) - radius;
+            int y = Mathf.FloorToInt((float)i / line) - radius;
             float v = Mathf.Clamp01((float)(x * x + y * y) / (radius * radius));
             buffer[i] = Mathf.RoundToInt(falloff.Evaluate(v) * 255);
         }
-    }
-
-    private static int[] GetStampRect(Point2 start, Point2 end) {
-        return new int[(end.x - start.x) * (end.y - start.y)];
-    }
-
-    private static void SetMapIndices(int[] indices, Point2 start, Point2 end) {
-        int line = end.x - start.x;
-        int mapstart = GetIndex(start);
-
-        for (int i = 0; i < indices.Length; ++i) {
-            if (i > 0 && i % line == 0) {
-                mapstart += MAP_DIM;
-            }
-            int n = mapstart + (i % line);
-            indices[i] = n;
-        }
-    }
-
-    private static int[] GetBufferIndexes(int[] buffer, int start, int radius) {
-        int line = 2 * radius - 1;
-        int[] indexes = new int[line * line];
-
-        for (int i = 0; i < buffer.Length; ++i) {
-            if (i > 0 && i % line == 0) {
-                start += MAP_DIM;
-            }
-            int n = start + (i % line);
-            indexes[i] = n;
-        }
-
-        return indexes;
-    }
-
-    private static float Sum(float[] values) {
-        float s = 0f;
-        for (int i = 0; i < values.Length; ++i) {
-            s += values[i];
-        }
-        return s;
-    }
-
-    private static int Sum(int[] values) {
-        int s = 0;
-        for (int i = 0; i < values.Length; ++i) {
-            s += values[i];
-        }
-        return s;
     }
     
     private static Point2 GetCoord(int i) {
@@ -473,7 +263,11 @@ public class Stamping : MonoBehaviour {
     }
     
     private static Point2 GetCoord(int i, int width) {
-        return new Point2(i % MAP_DIM, Mathf.FloorToInt((float)i / width));
+        return new Point2(i % width, Mathf.FloorToInt((float)i / width));
+    }
+
+    private static Point2 SnapToMap(Vector3 coord) {
+        return new Point2(Mathf.FloorToInt(coord.x), Mathf.FloorToInt(coord.z));
     }
 
     private static int GetIndex(Vector3 coord) {
