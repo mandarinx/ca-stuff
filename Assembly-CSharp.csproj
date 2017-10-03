@@ -52,8 +52,11 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Assets\Scripts\DataManager.cs" />
+    <Compile Include="Assets\Scripts\EntityManager.cs" />
     <Compile Include="Assets\Scripts\MeshUtils.cs" />
     <Compile Include="Assets\Scripts\Point2.cs" />
+    <Compile Include="Assets\Scripts\Rectangle.cs" />
     <Compile Include="Assets\Scripts\Stamping.cs" />
     <None Include="Assets\Shaders\VertexColors.shader" />
     <Reference Include="UnityEngine.UI">

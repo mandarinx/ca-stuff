@@ -237,6 +237,22 @@ MonoBehaviour:
     m_PreInfinity: 2
     m_PostInfinity: 2
     m_RotationOrder: 0
+  keyCodes: 3100000032000000
+  dataEntities:
+  - name: factory
+    dataLayer: pollution
+    id: 1
+    radius: 4
+    color: {r: 1, g: 0, b: 0, a: 0}
+    add: 1
+    remove: -1
+  - name: forest
+    dataLayer: pollution
+    id: 2
+    radius: 2
+    color: {r: 0.113133974, g: 0.71323526, b: 0, a: 0}
+    add: -1
+    remove: 1
 --- !u!4 &2141975790
 Transform:
   m_ObjectHideFlags: 0

@@ -1,73 +1,62 @@
 ﻿using System;
-using UnityEngine;
 using System.Collections.Generic;
+using UnityEngine;
 using Mandarin;
 
-namespace Mandarin {
+[Serializable]
+public struct DataEntity {
+    public string name;
+    public string dataLayer;
+    public uint id;
+    public int radius;
+    public Color color;
+    public StampMode add;
+    public StampMode remove;
+}
 
-    public struct Rectangle {
-        public int l;
-        public int r;
-        public int t;
-        public int b;
-
-        public Rectangle(int top, int right, int bottom, int left) {
-            l = left;
-            r = right;
-            t = top;
-            b = bottom;
-        }
-
-        public static Rectangle GetOverlap(Rectangle a, Rectangle b, Point2 apos) {
-            return new Rectangle(
-                Mathf.Min(apos.y + a.t, b.t) - apos.y,
-                Mathf.Min(apos.x + a.r, b.r) - apos.x,
-                Mathf.Max(apos.y + a.b, b.b) - apos.y,
-                Mathf.Max(apos.x + a.l, b.l) - apos.x
-            );
-        }
-    }
+public enum StampMode {
+    ADD = 1,
+    SUB = -1,
 }
 
 public class Stamping : MonoBehaviour {
-
-    private enum StampMode {
-        ADD = 1,
-        SUB = -1,
-    }
     
     private const int MAP_DIM = 32;
     private const int MAP_HALF_DIM = (int)(MAP_DIM * 0.5f);
     private const int MAP_AREA = MAP_DIM * MAP_DIM;
 
     [SerializeField]
-    private Material mat;
+    private Material         mat;
     [SerializeField]
-    private AnimationCurve falloff;
-    private int[] pollution = new int[MAP_AREA];
-    private Mesh[] meshes = new Mesh[MAP_AREA];
-    private List<int> factories = new List<int>();
-    private List<int> factoryIndex = new List<int>();
-    private List<int> forests = new List<int>();
-    private List<int> forestIndex = new List<int>();
+    private AnimationCurve   falloff;
+    [SerializeField]
+    private KeyCode[]        keyCodes;
+    [SerializeField]
+    private DataEntity[]     dataEntities;
 
-    private int tileValue;
-
-    private int[] entityRadius = new int[2] {
-        4, // factory
-        2, // forest
-    };
+    private DataManager           data;
+    private EntityManager         entities;
+    private Dictionary<uint, int> entityMap;
     
-    private KeyCode[] keyCodes;
-    private Action<Vector3>[] keyCallbacks;
-    private string[] keyHelp;
-    
-    private Rectangle mapRect = new Rectangle(
-        MAP_HALF_DIM - 1, MAP_HALF_DIM - 1, 
-        -MAP_HALF_DIM,    -MAP_HALF_DIM);
+    private readonly Mesh[]      meshes = new Mesh[MAP_AREA];
+    private readonly Rectangle   mapRect = new Rectangle(
+        MAP_HALF_DIM - 1, 
+        MAP_HALF_DIM - 1, 
+        -MAP_HALF_DIM,
+        -MAP_HALF_DIM
+    );
     
     private void Awake() {
-    
+        data = new DataManager(MAP_AREA);
+        data.AddLayer("pollution");
+        
+        entities = new EntityManager(MAP_AREA);
+        
+        entityMap = new Dictionary<uint, int>();
+        for (int i = 0; i < dataEntities.Length; ++i) {
+            entityMap.Add(dataEntities[i].id, i);
+        }
+        
         GameObject prefab = new GameObject();
         Mesh plane = MeshUtils.CreatePlane(1, 1, 1, 1);
         prefab.AddComponent<MeshFilter>().sharedMesh = plane;
@@ -85,16 +74,6 @@ public class Stamping : MonoBehaviour {
         }
         
         Destroy(prefab);
-        
-        keyCodes = new [] {
-            KeyCode.Alpha1, KeyCode.Alpha2, 
-        };
-        keyCallbacks = new Action<Vector3>[] {
-            HandleFactory, HandleForest
-        };
-        keyHelp = new[] {
-            "1 : Factory", "2 : Forest"
-        };
     }
 
     void Update() {
@@ -103,8 +82,6 @@ public class Stamping : MonoBehaviour {
         if (!Physics.Raycast(ray, out hit)) {
             return;
         }
-
-        tileValue = pollution[GetIndex(hit.point)];
         
         if (!Input.GetMouseButtonUp(0)) {
             return;
@@ -114,10 +91,34 @@ public class Stamping : MonoBehaviour {
             if (!Input.GetKey(keyCodes[i])) {
                 continue;
             }
-            keyCallbacks[i].Invoke(hit.point);
+            
+            int n = GetIndex(hit.point);
+            DataEntity entity = dataEntities[i];
+            
+            uint eID = entities.GetEntity(n);
+            StampMode mode = entity.add;
+            int radius = entity.radius;
+            uint newEID = entity.id;
+            int newVal = radius;
+            if (eID > 0) {
+                mode = entity.remove;
+                radius = entities.GetData(eID);
+                newEID = 0;
+                newVal = 0;
+            }
+            entities.SetEntity(n, newEID, newVal);
+            StampBlobToMap(radius, SnapToMap(hit.point), entity.dataLayer, mode);
             break;
         }
-        ColorizeEntities();
+        
+        for (int i = 0; i < entities.numEntities; ++i) {
+            uint id = entities.GetEntity(i);
+            if (id == 0) {
+                continue;
+            }
+            DataEntity de = dataEntities[entityMap[id]];
+            SetVertexColors(meshes[i], de.color);
+        }
     }
 
     private void OnDrawGizmos() {
@@ -130,68 +131,15 @@ public class Stamping : MonoBehaviour {
     }
 
     private void OnGUI() {
-        GUI.Label(new Rect(10, 10, 50, 20), tileValue.ToString());
-        float height = keyHelp.Length * 20f;
+        float height = keyCodes.Length * 20f;
         string help = "";
-        for (int i = 0; i < keyHelp.Length; ++i) {
-            help += keyHelp[i] + "\n";
+        for (int i = 0; i < keyCodes.Length; ++i) {
+            help += keyCodes[i] + " : " + dataEntities[i].name + "\n";
         }
-        GUI.Label(new Rect(10, Screen.height - height, 100, height), help);
-    }
-
-    private void HandleFactory(Vector3 coord) {
-        int f = GetIndex(coord);
-        int fi = factoryIndex.IndexOf(f);
-        if (fi >= 0) {
-            RemoveFactory(f, new Vector3(coord.x, factories[fi], coord.z));
-        } else {
-            AddFactory(f, new Vector3(coord.x, entityRadius[0], coord.z));
-        }
-    }
-
-    private void HandleForest(Vector3 coord) {
-        int f = GetIndex(coord);
-        int fi = forestIndex.IndexOf(f);
-        if (fi >= 0) {
-            RemoveForest(f, new Vector3(coord.x, forests[fi], coord.z));
-        } else {
-            AddForest(f, new Vector3(coord.x, entityRadius[1], coord.z));
-        }
-    }
-
-    private void RemoveForest(int f, Vector3 coord) {
-        int n = forestIndex.IndexOf(f);
-        int radius = (int)coord.y;
-        forestIndex[n] = -1;
-        forests[n] = 0;
-
-        StampBlobToMap(radius, SnapToMap(coord), pollution, StampMode.ADD);
-    }
-
-    private void AddForest(int f, Vector3 coord) {
-        int radius = (int)coord.y;
-        StampBlobToMap(radius, SnapToMap(coord), pollution, StampMode.SUB);
-        forests.Add(radius);
-        forestIndex.Add(GetIndex(coord));
-    }
-
-    public void AddFactory(int f, Vector3 coord) {
-        int radius = (int)coord.y;
-        StampBlobToMap(radius, SnapToMap(coord), pollution, StampMode.ADD);
-        factories.Add(radius);
-        factoryIndex.Add(GetIndex(coord));
-    }
-
-    public void RemoveFactory(int f, Vector3 coord) {
-        int n = factoryIndex.IndexOf(f);
-        int radius = (int)coord.y;
-        factoryIndex[n] = -1;
-        factories[n] = 0;
-
-        StampBlobToMap(radius, SnapToMap(coord), pollution, StampMode.SUB);
+        GUI.Label(new Rect(10, Screen.height - height, 300, height), help);
     }
     
-    private void StampBlobToMap(int radius, Point2 coord, int[] mapData, StampMode mode) {
+    private void StampBlobToMap(int radius, Point2 coord, string dataLayer, StampMode mode) {
         SetVertexColors(meshes[GetIndex(coord)], Color.magenta);
 
         Rectangle blitRect = new Rectangle(radius, radius, -radius, -radius);
@@ -205,6 +153,7 @@ public class Stamping : MonoBehaviour {
         int width = cropped.l * -1 + cropped.r + 1;
         int len = width * (cropped.b * -1 + cropped.t + 1);
         Vector3[] croppedBuffer = new Vector3[len];
+        int[] mapData = data.GetLayer(dataLayer);
         
         for (int i = 0; i < len; ++i) {
             Point2 bc = GetCoord(start + n, bufferWidth);
@@ -223,22 +172,6 @@ public class Stamping : MonoBehaviour {
             mapData[j] = mapData[j] + (int)croppedBuffer[i].y * (int)mode;
             float pf = (float)mapData[j] / 255;
             SetVertexColors(meshes[j], new Color(pf, pf, pf));
-        }
-    }
-
-    private void ColorizeEntities() {
-        for (int i = 0; i < factories.Count; ++i) {
-            if (factoryIndex[i] < 0) {
-                continue;
-            }
-            SetVertexColors(meshes[factoryIndex[i]], Color.red);
-        }
-
-        for (int i = 0; i < forests.Count; ++i) {
-            if (forestIndex[i] < 0) {
-                continue;
-            }
-            SetVertexColors(meshes[forestIndex[i]], Color.green);
         }
     }
 
