@@ -34,11 +34,15 @@ public class Stamping : MonoBehaviour {
     [SerializeField]
     private DataEntity[]     dataEntities;
 
-    private DataManager           data;
-    private EntityManager         entities;
-    private Dictionary<uint, int> entityMap;
+    private DataManager                       data;
+    private EntityManager                     entities;
+    private Dictionary<uint, int>             entityMap;
+    private List<string>                      dirtyLayers;
+    private Dictionary<string, Action<int[]>> layerHandlers;
+    private LayerViz[]                        layerVizes;
+    private string[]                          layerVizIndex;
+    private LayerViz                          entityViz;
     
-    private readonly Mesh[]      meshes = new Mesh[MAP_AREA];
     private readonly Rectangle   mapRect = new Rectangle(
         MAP_HALF_DIM - 1, 
         MAP_HALF_DIM - 1, 
@@ -49,34 +53,29 @@ public class Stamping : MonoBehaviour {
     private void Awake() {
         data = new DataManager(MAP_AREA);
         data.AddLayer("pollution");
+        data.AddLayer("land_value");
+        
+        layerVizes = new [] {
+            new LayerViz("pollution",  new Vector3(MAP_DIM + 2, 0, 0),                  MAP_AREA, mat),
+            new LayerViz("land_value", new Vector3(MAP_DIM + 2, 0, (MAP_DIM + 2) * -1), MAP_AREA, mat),
+        };
+        layerVizIndex = new[] {"pollution", "land_value"};
         
         entities = new EntityManager(MAP_AREA);
+        entityViz = new LayerViz("entities", Vector3.zero, MAP_AREA, mat);
         
         entityMap = new Dictionary<uint, int>();
         for (int i = 0; i < dataEntities.Length; ++i) {
             entityMap.Add(dataEntities[i].id, i);
         }
         
-        GameObject prefab = new GameObject();
-        Mesh plane = MeshUtils.CreatePlane(1, 1, 1, 1);
-        prefab.AddComponent<MeshFilter>().sharedMesh = plane;
-        prefab.AddComponent<MeshRenderer>().sharedMaterial = mat;
-        prefab.AddComponent<BoxCollider>().size = Vector3.forward + Vector3.right;
-        
-        for (int i = 0; i < MAP_AREA; ++i) {
-            GameObject t = Instantiate(prefab);
-            t.transform.position = GetCoord(i).ToVector3XZ();
-            t.transform.SetParent(transform);
-            t.name = GetCoord(i).x + "_" + GetCoord(i).y;
-            meshes[i] = transform.GetChild(i).GetComponent<MeshFilter>().mesh;
-            
-            SetVertexColors(meshes[i], Color.black);
-        }
-        
-        Destroy(prefab);
+        dirtyLayers = new List<string>();
+        layerHandlers = new Dictionary<string, Action<int[]>> {
+            { "pollution", OnPollutionUpdated }
+        };
     }
 
-    void Update() {
+    private void Update() {
         Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
         RaycastHit hit;
         if (!Physics.Raycast(ray, out hit)) {
@@ -108,7 +107,23 @@ public class Stamping : MonoBehaviour {
             }
             entities.SetEntity(n, newEID, newVal);
             StampBlobToMap(radius, SnapToMap(hit.point), entity.dataLayer, mode);
+            dirtyLayers.Add(entity.dataLayer);
             break;
+        }
+
+        for (int i = 0; i < dirtyLayers.Count; ++i) {
+            Action<int[]> handler = layerHandlers[dirtyLayers[i]];
+            int[] layer = data.GetLayer(dirtyLayers[i]);
+            handler(layer);
+            int v = Array.IndexOf(layerVizIndex, dirtyLayers[i]);
+            layerVizes[v].Colorize(layer);
+        }
+        
+        dirtyLayers.Clear();
+
+        for (int i = 0; i < layerVizes.Length; ++i) {
+            int[] layer = data.GetLayer(layerVizes[i].name);
+            layerVizes[i].Colorize(layer);
         }
         
         for (int i = 0; i < entities.numEntities; ++i) {
@@ -117,15 +132,15 @@ public class Stamping : MonoBehaviour {
                 continue;
             }
             DataEntity de = dataEntities[entityMap[id]];
-            SetVertexColors(meshes[i], de.color);
+            entityViz.Colorize(i, de.color);
         }
     }
 
     private void OnDrawGizmos() {
-        for (int i = 0; i < MAP_DIM; ++i) {
+        for (int i = 0; i < MAP_DIM + 1; ++i) {
             Gizmos.DrawLine(new Vector3(i, 0, 0), new Vector3(i, 0, MAP_DIM));
         }
-        for (int i = 0; i < MAP_DIM; ++i) {
+        for (int i = 0; i < MAP_DIM + 1; ++i) {
             Gizmos.DrawLine(new Vector3(0, 0, i), new Vector3(MAP_DIM, 0, i));
         }
     }
@@ -138,10 +153,16 @@ public class Stamping : MonoBehaviour {
         }
         GUI.Label(new Rect(10, Screen.height - height, 300, height), help);
     }
+
+    private void OnPollutionUpdated(int[] pollution) {
+        int[] landValue = data.GetLayer("land_value");
+        
+        for (int i = 0; i < pollution.Length; ++i) {
+            landValue[i] = 255 - pollution[i];
+        }
+    }
     
     private void StampBlobToMap(int radius, Point2 coord, string dataLayer, StampMode mode) {
-        SetVertexColors(meshes[GetIndex(coord)], Color.magenta);
-
         Rectangle blitRect = new Rectangle(radius, radius, -radius, -radius);
         Rectangle cropped = Rectangle.GetOverlap(blitRect, mapRect, coord - MAP_HALF_DIM);
         int[] buffer = GetStampBuffer(radius);
@@ -170,8 +191,6 @@ public class Stamping : MonoBehaviour {
                 coord.y + croppedBuffer[i].z - radius);
             int j = GetIndex(c);
             mapData[j] = mapData[j] + (int)croppedBuffer[i].y * (int)mode;
-            float pf = (float)mapData[j] / 255;
-            SetVertexColors(meshes[j], new Color(pf, pf, pf));
         }
     }
 
@@ -191,7 +210,7 @@ public class Stamping : MonoBehaviour {
         }
     }
     
-    private static Point2 GetCoord(int i) {
+    public static Point2 GetCoord(int i) {
         return new Point2(i % MAP_DIM, i >> 5);
     }
     
@@ -213,13 +232,5 @@ public class Stamping : MonoBehaviour {
 
     private static int GetIndex(Point2 coord, int dim) {
         return Mathf.FloorToInt(coord.y) * dim + Mathf.FloorToInt(coord.x);
-    }
-
-    private static void SetVertexColors(Mesh mesh, Color col) {
-        Color[] colors = new Color[mesh.vertices.Length];
-        for (int i = 0; i < mesh.colors.Length; ++i) {
-            colors[i] = col;
-        }
-        mesh.colors = colors;
     }
 }

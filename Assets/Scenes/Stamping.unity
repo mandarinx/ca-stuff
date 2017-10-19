@@ -109,6 +109,8 @@ NavMeshSettings:
     manualTileSize: 0
     tileSize: 256
     accuratePlacement: 0
+    debug:
+      m_Flags: 0
   m_NavMeshData: {fileID: 0}
 --- !u!1 &1248386382
 GameObject:
@@ -119,7 +121,6 @@ GameObject:
   m_Component:
   - component: {fileID: 1248386387}
   - component: {fileID: 1248386386}
-  - component: {fileID: 1248386385}
   - component: {fileID: 1248386383}
   m_Layer: 0
   m_Name: Main Camera
@@ -130,13 +131,6 @@ GameObject:
   m_IsActive: 1
 --- !u!81 &1248386383
 AudioListener:
-  m_ObjectHideFlags: 0
-  m_PrefabParentObject: {fileID: 0}
-  m_PrefabInternal: {fileID: 0}
-  m_GameObject: {fileID: 1248386382}
-  m_Enabled: 1
---- !u!92 &1248386385
-Behaviour:
   m_ObjectHideFlags: 0
   m_PrefabParentObject: {fileID: 0}
   m_PrefabInternal: {fileID: 0}
@@ -177,7 +171,6 @@ Camera:
   m_OcclusionCulling: 0
   m_StereoConvergence: 10
   m_StereoSeparation: 0.022
-  m_StereoMirrorMode: 0
 --- !u!4 &1248386387
 Transform:
   m_ObjectHideFlags: 0
