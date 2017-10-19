@@ -71,8 +71,16 @@ public class Stamping : MonoBehaviour {
         
         dirtyLayers = new List<string>();
         layerHandlers = new Dictionary<string, Action<int[]>> {
-            { "pollution", OnPollutionUpdated }
+            { "pollution",  OnPollutionUpdated },
+            { "land_value", OnLandValueUpdated }
         };
+        
+        for (int i = 0; i < layerVizIndex.Length; ++i) {
+            Action<int[]> handler = layerHandlers[layerVizIndex[i]];
+            handler(data.GetLayer(layerVizIndex[i]));
+        }
+
+        DrawLayers();
     }
 
     private void Update() {
@@ -120,15 +128,12 @@ public class Stamping : MonoBehaviour {
         }
         
         dirtyLayers.Clear();
-
-        for (int i = 0; i < layerVizes.Length; ++i) {
-            int[] layer = data.GetLayer(layerVizes[i].name);
-            layerVizes[i].Colorize(layer);
-        }
+        DrawLayers();
         
         for (int i = 0; i < entities.numEntities; ++i) {
             uint id = entities.GetEntity(i);
             if (id == 0) {
+                entityViz.Colorize(i, Color.black);
                 continue;
             }
             DataEntity de = dataEntities[entityMap[id]];
@@ -136,14 +141,21 @@ public class Stamping : MonoBehaviour {
         }
     }
 
-    private void OnDrawGizmos() {
-        for (int i = 0; i < MAP_DIM + 1; ++i) {
-            Gizmos.DrawLine(new Vector3(i, 0, 0), new Vector3(i, 0, MAP_DIM));
-        }
-        for (int i = 0; i < MAP_DIM + 1; ++i) {
-            Gizmos.DrawLine(new Vector3(0, 0, i), new Vector3(MAP_DIM, 0, i));
+    private void DrawLayers() {
+        for (int i = 0; i < layerVizes.Length; ++i) {
+            int[] layer = data.GetLayer(layerVizes[i].name);
+            layerVizes[i].Colorize(layer);
         }
     }
+
+//    private void OnDrawGizmos() {
+//        for (int i = 0; i < MAP_DIM + 1; ++i) {
+//            Gizmos.DrawLine(new Vector3(i, 0, 0), new Vector3(i, 0, MAP_DIM));
+//        }
+//        for (int i = 0; i < MAP_DIM + 1; ++i) {
+//            Gizmos.DrawLine(new Vector3(0, 0, i), new Vector3(MAP_DIM, 0, i));
+//        }
+//    }
 
     private void OnGUI() {
         float height = keyCodes.Length * 20f;
@@ -161,6 +173,8 @@ public class Stamping : MonoBehaviour {
             landValue[i] = 255 - pollution[i];
         }
     }
+    
+    private void OnLandValueUpdated(int[] land_value) {}
     
     private void StampBlobToMap(int radius, Point2 coord, string dataLayer, StampMode mode) {
         Rectangle blitRect = new Rectangle(radius, radius, -radius, -radius);
